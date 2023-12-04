@@ -32,6 +32,8 @@
 #include "features.h"
 #include "protocol.h"
 #include "logging.h"
+#include "timer.h"
+#include "HardwareProfile.h"
 
 // define in non-const arrays to ensure data space
 static char descManufacturer[] = "IOIO Open Source Project";
@@ -55,7 +57,8 @@ typedef enum {
   STATE_OPEN_CHANNEL,
   STATE_WAIT_CHANNEL_OPEN,
   STATE_CONNECTED,
-  STATE_ERROR
+  STATE_ERROR,
+  STATE_RESET
 } STATE;
 
 static STATE state = STATE_INIT;
@@ -66,22 +69,31 @@ void AppCallback(const void* data, UINT32 data_len, int_or_ptr_t arg);
 static inline CHANNEL_HANDLE OpenAvailableChannel() {
   int_or_ptr_t arg = { .i = 0 };
   if (ConnectionTypeSupported(CHANNEL_TYPE_ADB)) {
+    log_printf("ADB is supported");
     if (ConnectionCanOpenChannel(CHANNEL_TYPE_ADB)) {
+      log_printf("ADB can be opened");
       return ConnectionOpenChannelAdb("tcp:4545", &AppCallback, arg);
     }
   } else if (ConnectionTypeSupported(CHANNEL_TYPE_ACC)) {
+      log_printf("ACC is supported");
     if (ConnectionCanOpenChannel(CHANNEL_TYPE_ACC)) {
+        log_printf("ACC can be opened");
       return ConnectionOpenChannelAccessory(&AppCallback, arg);
     }
   } else if (ConnectionTypeSupported(CHANNEL_TYPE_BT)) {
+      log_printf("BT is supported");
     if (ConnectionCanOpenChannel(CHANNEL_TYPE_BT)) {
+        log_printf("BT can be opened");
       return ConnectionOpenChannelBtServer(&AppCallback, arg);
     }
   } else if (ConnectionTypeSupported(CHANNEL_TYPE_CDC_DEVICE)) {
+      log_printf("CDC is supported");
     if (ConnectionCanOpenChannel(CHANNEL_TYPE_CDC_DEVICE)) {
+        log_printf("CDC can be opened");
       return ConnectionOpenChannelCdc(&AppCallback, arg);
     }
   }
+  log_printf("can't open channel :(");
   return INVALID_CHANNEL_HANDLE;
 }
 
@@ -105,27 +117,39 @@ void AppCallback(const void* data, UINT32 data_len, int_or_ptr_t arg) {
 }
 
 int main() {
+  int count = 0;
+  STATE prev_state = STATE_INIT;
+
   log_init();
   log_printf("***** Hello from app-layer! *******");
-
+  
   SoftReset();
   ConnectionInit();
   while (1) {
     ConnectionTasks();
     switch (state) {
       case STATE_INIT:
+        log_printf("STATE_INIT");
         handle = INVALID_CHANNEL_HANDLE;
         state = STATE_OPEN_CHANNEL;
         break;
 
       case STATE_OPEN_CHANNEL:
+        log_printf("STATE_OPEN_CHANNEL");
+        count++;
         if ((handle = OpenAvailableChannel()) != INVALID_CHANNEL_HANDLE) {
-          log_printf("Connected");
+          log_printf("Connected, handle = %d", handle);
           state = STATE_WAIT_CHANNEL_OPEN;
+        } else {            
+          if ((count % 100000) == 0) {
+            state = STATE_RESET;
+          }
         }
         break;
 
       case STATE_WAIT_CHANNEL_OPEN:
+       log_printf("STATE_WAIT_CHANNEL_OPEN");
+       log_printf("calling ConnectionCanSend with handle = %d", handle);
        if (ConnectionCanSend(handle)) {
           log_printf("Channel open");
           AppProtocolInit(handle);
@@ -134,14 +158,28 @@ int main() {
         break;
 
       case STATE_CONNECTED:
+        log_printf("STATE_CONNECTED");
         AppProtocolTasks(handle);
         break;
 
       case STATE_ERROR:
+        log_printf("STATE_ERROR");
         ConnectionCloseChannel(handle);
+        DelayMs(50);
         SoftReset();
+        ConnectionInit();
         state = STATE_INIT;
         break;
+        
+      case STATE_RESET:
+        log_printf("STATE_RESET");
+        count = 0;
+        ConnectionShutdownAll();
+        DelayMs(50);
+        SoftReset();
+        ConnectionInit();
+        state = STATE_INIT;
+        break;  
     }
   }
   return 0;

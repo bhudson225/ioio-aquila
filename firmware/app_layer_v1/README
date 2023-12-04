@@ -8,6 +8,18 @@ application layer protocol, which enables control of the IOIO's on-board
 peripherals over a serial connection, which is established by the lower layers
 of the IOIO firmware stack.
 
+Modifications
+------------
+Compared to the original code, this version includes a crude timer to force a
+reset if no connection is made within about 10s. It then disconnects the USB
+line, resets the IOIO, and waits 50ms for VBus to drain. This has been tested
+with the Aquila GPS unit. All changes from original are to main.c.
+
+Building
+------------
+Use XC16 v1.25 compiler only. Use OTG version of libusb, not OTG-ADB (deprecated). 
+Ensure PIC24 peripheral library is installed from Microchip download archive.
+
 Code Organization
 -----------------
 The file main.c contains the main function and the main state machine, which
